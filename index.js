@@ -282,3 +282,19 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(TOKEN);
+
+const express = require("express");
+const app = express();
+
+// أي بورت تعطيك إياه Render (أو 3000 لو محلي)
+const PORT = process.env.PORT || 3000;
+
+// صفحة بسيطة لتأكيد أن البوت شغال
+app.get("/", (req, res) => {
+  res.send("✅ Bot is running successfully!");
+});
+
+// تشغيل السيرفر
+app.listen(PORT, () => {
+  console.log(`Fake server running on port ${PORT}`);
+});
