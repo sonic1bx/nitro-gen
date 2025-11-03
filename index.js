@@ -5,20 +5,15 @@
 // Rate: randomized between 500ms and 1000ms (≈1-2 msgs/sec).
 // Built-in safety: maxMessagesPerRun, cooldownBetweenRuns (ms).
 
-const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  PermissionsBitField,
-} = require("discord.js");
-require("dotenv").config();
+const { Client, GatewayIntentBits, Partials, PermissionsBitField } = require('discord.js');
+require('dotenv').config();
 
 const TOKEN = process.env.BOT_TOKEN; // put token in .env as BOT_TOKEN=...
-const PREFIX = ""; // empty because we use raw message "gen"
-const COMMAND = "gen";
+const PREFIX = ''; // empty because we use raw message "gen"
+const COMMAND = 'gen';
 
 if (!TOKEN) {
-  console.error("Please set BOT_TOKEN in .env");
+  console.error('Please set BOT_TOKEN in .env');
   process.exit(1);
 }
 
@@ -28,14 +23,15 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, // required to read message content
   ],
-  partials: [Partials.Channel],
+  partials: [Partials.Channel]
 });
 
 // Safety/config
-const maxMessagesPerRun = 500;
-const minIntervalMs = 100; // 0.1s -> ~10 msgs/sec min
-const maxIntervalMs = 1000; // 1s  -> ~1 msg/sec max
-const cooldownBetweenRuns = 5000; // 5 seconds cooldown between runs
+const maxMessagesPerRun = 99999999999;         // maximum number of links sent in one "gen" run
+const cooldownBetweenRuns = 5 * 60 * 50; // 5 minutes cooldown between runs per guild
+const minIntervalMs = 500;   // 0.5s -> ~2 msgs/sec max
+const maxIntervalMs = 500;  // 1s  -> ~1 msg/sec min
+
 // In-memory per-guild state
 const guildState = new Map(); // guildId -> { lastRun: timestamp, running: boolean }
 
@@ -45,31 +41,26 @@ function randomInt(min, max) {
 
 // generate a safe placeholder "link" (NOT a real Discord gift)
 function makePlaceholderLink() {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let code = "";
-  for (let i = 0; i < 32; i++)
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let code = '';
+  for (let i = 0; i < 24; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
   // Use example.com to avoid creating potentially valid discord URLs
-  return `https://discord.com/gift/${code}`;
+  return `https://discord.gift/${code}`;
 }
 
 async function startGenerating(channel, guildId, requestedCount, requesterTag) {
-  if (!guildState.has(guildId))
-    guildState.set(guildId, { lastRun: 0, running: false });
+  if (!guildState.has(guildId)) guildState.set(guildId, { lastRun: 0, running: false });
 
   const state = guildState.get(guildId);
 
   const now = Date.now();
   if (state.running) {
-    await channel.send(`${requesterTag} — اصبر`);
+    await channel.send(`${requesterTag} —  الرجاء الانتظار .`);
     return;
   }
   if (now - state.lastRun < cooldownBetweenRuns) {
-    const remaining = Math.ceil(
-      (cooldownBetweenRuns - (now - state.lastRun)) / 1000,
-    );
-    await channel.send(`${requesterTag} — اصبر ${remaining}.`);
+    const remaining = Math.ceil((cooldownBetweenRuns - (now - state.lastRun)) / 1000);
+    await channel.send(`${requesterTag} — لا يمكنك البدء الآن. انتظر ${remaining} ثانية قبل المحاولة مرة أخرى.`);
     return;
   }
 
@@ -79,27 +70,23 @@ async function startGenerating(channel, guildId, requestedCount, requesterTag) {
   state.running = true;
   state.lastRun = now;
 
-  await channel.send(`${requesterTag} — بدء الإرسال (${count} `);
+  await channel.send(`${requesterTag} — بدء الإرسال (${count} روابط ). اضغط ❌ لوقف العملية.`);
 
   // optional: create a message with a stop button (simple implementation via reaction)
   let stopRequested = false;
   try {
-    const controlMsg = await channel.send("اضغط ❌ هنا لإيقاف الإرسال المبكر.");
-    await controlMsg.react("❌");
+    const controlMsg = await channel.send('اضغط ❌ هنا لإيقاف الإرسال المبكر.');
+    await controlMsg.react('❌');
 
-    const filter = (reaction, user) =>
-      reaction.emoji.name === "❌" && !user.bot;
-    const collector = controlMsg.createReactionCollector({
-      filter,
-      time: 10 * 60 * 1000,
-    }); // 10 min max
+    const filter = (reaction, user) => reaction.emoji.name === '❌' && !user.bot;
+    const collector = controlMsg.createReactionCollector({ filter, time: 10 * 60 * 1000 }); // 10 min max
 
-    collector.on("collect", () => {
+    collector.on('collect', () => {
       stopRequested = true;
       collector.stop();
     });
 
-    collector.on("end", () => {
+    collector.on('end', () => {
       // cleanup reaction (best-effort)
       controlMsg.reactions.removeAll().catch(() => {});
     });
@@ -107,37 +94,35 @@ async function startGenerating(channel, guildId, requestedCount, requesterTag) {
     // Sending loop
     for (let i = 0; i < count; i++) {
       if (stopRequested) {
-        await channel.send(
-          `${requesterTag} — تم إيقاف العملية مبكرًا بعد إرسال ${i} روابط.`,
-        );
+        await channel.send(`${requesterTag} — تم إيقاف  ${i} روابط.`);
         break;
       }
 
       const link = makePlaceholderLink();
       // send as plain message or embed
-      await channel.send({ content: `link #${i + 1}: ${link}` });
+      await channel.send({ content: ` link #${i+1}: ${link}` });
 
       // random interval between minIntervalMs and maxIntervalMs
       const wait = randomInt(minIntervalMs, maxIntervalMs);
-      await new Promise((res) => setTimeout(res, wait));
+      await new Promise(res => setTimeout(res, wait));
     }
 
     if (!stopRequested) {
-      await channel.send(`${requesterTag} — انتهى  ${count} `);
+      await channel.send(`${requesterTag} — انتهى الإرسال (أُرسلت ${count} روابط ).`);
     }
   } catch (err) {
-    console.error("Error during generation run:", err);
+    console.error('Error during generation run:', err);
     await channel.send(`حدث خطأ: ${err.message}`);
   } finally {
     state.running = false;
   }
 }
 
-client.on("ready", () => {
+client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-client.on("messageCreate", async (message) => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (!message.guild) return; // only in guilds
   const content = message.content.trim();
@@ -148,9 +133,7 @@ client.on("messageCreate", async (message) => {
   // permission check: must be admin (you can change to role name check)
   const member = await message.guild.members.fetch(message.author.id);
   if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-    await message.reply(
-      "لا تملك صلاحية تنفيذ هذا الأمر. مطلوبة: Administrator.",
-    );
+    await message.reply('لا تملك صلاحية تنفيذ هذا الأمر. مطلوبة: Administrator.');
     return;
   }
 
@@ -163,12 +146,7 @@ client.on("messageCreate", async (message) => {
   }
 
   // start generation in the same channel (non-blocking)
-  startGenerating(
-    message.channel,
-    message.guild.id,
-    requestedCount,
-    `<@${message.author.id}>`,
-  );
+  startGenerating(message.channel, message.guild.id, requestedCount, `<@${message.author.id}>`);
 });
 
 client.login(TOKEN);
