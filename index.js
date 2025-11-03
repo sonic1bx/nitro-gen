@@ -310,16 +310,14 @@ client.on('messageCreate', async (message) => {
 
 client.login(TOKEN);
 
-// server.js
+// كود بسيط يفتح بورت علشان Render يعتقد أن السيرفر شغال
 const express = require('express');
 const app = express();
 
-// مسار اختبار بسيط
-app.get('/', (req, res) => res.send('Bot alive'));
-
-// استخدم PORT من بيئة Render أو بورت احتياطي (مثلاً 49152)
-const PORT = process.env.PORT || 49152;
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+app.get('/', (req, res) => {
+  res.send('Bot alive ✅');
 });
+
+const PORT = process.env.PORT || 3000; // تقدر تغيّر 3000 لأي بورت تبيه
+app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
 
