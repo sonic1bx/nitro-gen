@@ -5,12 +5,22 @@
 // Rate: randomized between 500ms and 1000ms (≈1-2 msgs/sec).
 // Built-in safety: maxMessagesPerRun, cooldownBetweenRuns (ms).
 
-const { Client, GatewayIntentBits, Partials, PermissionsBitField } = require('discord.js');
+const { 
+  Client, 
+  GatewayIntentBits, 
+  Partials, 
+  PermissionsBitField,
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder
+} = require('discord.js');
 require('dotenv').config();
 
 const TOKEN = process.env.BOT_TOKEN; // put token in .env as BOT_TOKEN=...
 const PREFIX = ''; // empty because we use raw message "gen"
 const COMMAND = 'gen';
+const STOP_COMMAND = 'stop';
 
 if (!TOKEN) {
   console.error('Please set BOT_TOKEN in .env');
@@ -23,7 +33,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, // required to read message content
   ],
-  partials: [Partials.Channel]
+  partials: [Partials.Channel],
+  allowedMentions: { 
+    parse: ['everyone', 'users', 'roles'] // للسماح بمنشن @everyone
+  }
 });
 
 // Safety/config
@@ -48,8 +61,23 @@ function makePlaceholderLink() {
   return `https://discord.gift/${code}`;
 }
 
+// دالة للتحقق من صحة رابط النيترو
+async function checkNitroCode(code) {
+  try {
+    const fetch = (await import('node-fetch')).default;
+    const url = `https://discord.com/api/v9/entitlements/gift-codes/${code}`;
+    const response = await fetch(url);
+    
+    // إذا كان الرد 200، الرابط صحيح ولم يُستخدم
+    return response.status === 200;
+  } catch (error) {
+    console.error('Error checking code:', error);
+    return false;
+  }
+}
+
 async function startGenerating(channel, guildId, requestedCount, requesterTag) {
-  if (!guildState.has(guildId)) guildState.set(guildId, { lastRun: 0, running: false });
+  if (!guildState.has(guildId)) guildState.set(guildId, { lastRun: 0, running: false, stopRequested: false });
 
   const state = guildState.get(guildId);
 
@@ -69,46 +97,77 @@ async function startGenerating(channel, guildId, requestedCount, requesterTag) {
 
   state.running = true;
   state.lastRun = now;
+  state.stopRequested = false;
 
-  await channel.send(`${requesterTag} — بدء الإرسال (${count} روابط ). اضغط ❌ لوقف العملية.`);
+  const startEmbed = new EmbedBuilder()
+    .setColor('#57F287')
+    .setTitle('🚀 بدء عملية التوليد')
+    .setDescription(`جاري إرسال **${count}** رابط نيترو...`)
+    .addFields(
+      { name: '⏹️ للإيقاف', value: 'اكتب `stop` في أي وقت', inline: true },
+      { name: '✅ الحالة', value: 'قيد التشغيل', inline: true }
+    )
+    .setTimestamp();
 
-  // optional: create a message with a stop button (simple implementation via reaction)
-  let stopRequested = false;
+  await channel.send({ content: requesterTag, embeds: [startEmbed] });
+
   try {
-    const controlMsg = await channel.send('اضغط ❌ هنا لإيقاف الإرسال المبكر.');
-    await controlMsg.react('❌');
-
-    const filter = (reaction, user) => reaction.emoji.name === '❌' && !user.bot;
-    const collector = controlMsg.createReactionCollector({ filter, time: 10 * 60 * 1000 }); // 10 min max
-
-    collector.on('collect', () => {
-      stopRequested = true;
-      collector.stop();
-    });
-
-    collector.on('end', () => {
-      // cleanup reaction (best-effort)
-      controlMsg.reactions.removeAll().catch(() => {});
-    });
 
     // Sending loop
     for (let i = 0; i < count; i++) {
-      if (stopRequested) {
-        await channel.send(`${requesterTag} — تم إيقاف  ${i} روابط.`);
+      if (state.stopRequested) {
+        const stopEmbed = new EmbedBuilder()
+          .setColor('#ED4245')
+          .setTitle('⏹️ تم إيقاف العملية')
+          .setDescription(`تم إيقاف العملية بعد إرسال **${i}** رابط.`)
+          .setTimestamp();
+        
+        await channel.send({ content: requesterTag, embeds: [stopEmbed] });
         break;
       }
 
       const link = makePlaceholderLink();
-      // send as plain message or embed
-      await channel.send({ content: ` link #${i+1}: ${link}` });
+      const code = link.replace('https://discord.gift/', '');
+      
+      // التحقق من صحة الرابط
+      const isValid = await checkNitroCode(code);
+      
+      if (isValid) {
+        // إذا كان الرابط صحيح، منشن @everyone مع Embed
+        const validEmbed = new EmbedBuilder()
+          .setColor('#FFD700')
+          .setTitle('🎉 تم العثور على رابط نيترو صحيح! 🎉')
+          .setDescription(`**الرابط:** ${link}`)
+          .addFields(
+            { name: '🔢 رقم الرابط', value: `#${i+1}`, inline: true },
+            { name: '✅ الحالة', value: 'صحيح ومتاح', inline: true }
+          )
+          .setTimestamp();
+        
+        await channel.send({ 
+          content: '@everyone',
+          embeds: [validEmbed],
+          allowedMentions: { parse: ['everyone'] }
+        });
+        console.log(`✅ Valid code found: ${code}`);
+      } else {
+        // إذا كان الرابط غير صحيح، إرساله عادي
+        await channel.send({ content: `link #${i+1}: ${link}` });
+      }
 
       // random interval between minIntervalMs and maxIntervalMs
       const wait = randomInt(minIntervalMs, maxIntervalMs);
       await new Promise(res => setTimeout(res, wait));
     }
 
-    if (!stopRequested) {
-      await channel.send(`${requesterTag} — انتهى الإرسال (أُرسلت ${count} روابط ).`);
+    if (!state.stopRequested) {
+      const finishEmbed = new EmbedBuilder()
+        .setColor('#57F287')
+        .setTitle('✅ اكتملت العملية بنجاح')
+        .setDescription(`تم إرسال **${count}** رابط بنجاح.`)
+        .setTimestamp();
+      
+      await channel.send({ content: requesterTag, embeds: [finishEmbed] });
     }
   } catch (err) {
     console.error('Error during generation run:', err);
@@ -118,35 +177,115 @@ async function startGenerating(channel, guildId, requestedCount, requesterTag) {
   }
 }
 
-client.on('ready', () => {
+client.on('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
+});
+
+// معالجة Select Menu
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isStringSelectMenu()) return;
+  
+  if (interaction.customId === 'link_count_select') {
+    const selectedCount = parseInt(interaction.values[0]);
+    
+    await interaction.update({
+      content: `✅ تم اختيار **${selectedCount}** رابط. جاري البدء...`,
+      components: []
+    });
+    
+    // بدء عملية التوليد
+    startGenerating(
+      interaction.channel,
+      interaction.guild.id,
+      selectedCount,
+      `<@${interaction.user.id}>`
+    );
+  }
 });
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (!message.guild) return; // only in guilds
-  const content = message.content.trim();
+  const content = message.content.trim().toLowerCase();
 
-  // simple command: "gen" optionally followed by number (count)
-  if (!content.toLowerCase().startsWith(COMMAND)) return;
+  // أمر stop لإيقاف العملية
+  if (content === STOP_COMMAND) {
+    const member = await message.guild.members.fetch(message.author.id);
+    if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      await message.reply('لا تملك صلاحية تنفيذ هذا الأمر.');
+      return;
+    }
+    
+    const state = guildState.get(message.guild.id);
+    if (state && state.running) {
+      state.stopRequested = true;
+      await message.reply('✅ تم طلب إيقاف العملية. سيتم الإيقاف بعد الرابط الحالي.');
+    } else {
+      await message.reply('❌ لا توجد عملية قيد التشغيل حالياً.');
+    }
+    return;
+  }
 
-  // permission check: must be admin (you can change to role name check)
+  // أمر gen لبدء العملية
+  if (!content.startsWith(COMMAND)) return;
+
+  // permission check: must be admin
   const member = await message.guild.members.fetch(message.author.id);
   if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
     await message.reply('لا تملك صلاحية تنفيذ هذا الأمر. مطلوبة: Administrator.');
     return;
   }
 
-  // parse optional number after command, e.g. "gen 20"
-  const parts = content.split(/\s+/);
-  let requestedCount = 0;
-  if (parts.length >= 2) {
-    const p = parseInt(parts[1], 10);
-    if (!isNaN(p)) requestedCount = p;
-  }
+  // إنشاء Embed مع Select Menu
+  const embed = new EmbedBuilder()
+    .setColor('#5865F2')
+    .setTitle('🎁 مولد روابط النيترو')
+    .setDescription('اختر عدد الروابط التي تريد إرسالها:')
+    .addFields(
+      { name: '📊 الخيارات المتاحة', value: '100 - 500 - 1000 - 2500 - 5000 رابط' },
+      { name: '⏹️ الإيقاف', value: 'اكتب `stop` لإيقاف العملية في أي وقت' }
+    )
+    .setFooter({ text: 'سيتم التحقق من كل رابط تلقائياً' })
+    .setTimestamp();
 
-  // start generation in the same channel (non-blocking)
-  startGenerating(message.channel, message.guild.id, requestedCount, `<@${message.author.id}>`);
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId('link_count_select')
+    .setPlaceholder('اختر عدد الروابط...')
+    .addOptions([
+      new StringSelectMenuOptionBuilder()
+        .setLabel('100 رابط')
+        .setDescription('إرسال 100 رابط نيترو')
+        .setValue('100')
+        .setEmoji('1️⃣'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('500 رابط')
+        .setDescription('إرسال 500 رابط نيترو')
+        .setValue('500')
+        .setEmoji('2️⃣'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('1000 رابط')
+        .setDescription('إرسال 1000 رابط نيترو')
+        .setValue('1000')
+        .setEmoji('3️⃣'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('2500 رابط')
+        .setDescription('إرسال 2500 رابط نيترو')
+        .setValue('2500')
+        .setEmoji('4️⃣'),
+      new StringSelectMenuOptionBuilder()
+        .setLabel('5000 رابط')
+        .setDescription('إرسال 5000 رابط نيترو')
+        .setValue('5000')
+        .setEmoji('5️⃣')
+    ]);
+
+  const row = new ActionRowBuilder()
+    .addComponents(selectMenu);
+
+  await message.reply({
+    embeds: [embed],
+    components: [row]
+  });
 });
 
 client.login(TOKEN);
