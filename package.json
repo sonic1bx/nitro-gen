@@ -1,14 +1,14 @@
 {
   "name": "safe-gen-bot",
   "version": "1.0.0",
-  "description": "Educational/demo Discord bot that sends placeholder links (safe). Not for generating real gift codes.",
+  "description": "demo Discord bot nitro gen",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
     "lint": "echo \"No linter configured\""
   },
-  "author": "YourName",
+  "author": "v_nw",
   "license": "MIT",
   "engines": {
     "node": ">=16.9.0"
